@@ -4,7 +4,7 @@ import math
 
 class Loader:
 
-    def __init__(self, batch_size=1, split_fractions = [0.9, 0.1]):
+    def __init__(self, batch_size=1, split_fractions = [0.8, 0.2]):
         self.batch_size = batch_size
 
         self.rooms = np.load('./data/room.npy')

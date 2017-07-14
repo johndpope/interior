@@ -31,6 +31,7 @@ parser.add_argument("--progress_freq", type=int, default=1, help="display progre
 parser.add_argument("--trace_freq", type=int, default=0, help="trace execution every trace_freq steps")
 parser.add_argument("--display_freq", type=int, default=1, help="write current training images every display_freq steps")
 parser.add_argument("--save_freq", type=int, default=10, help="save model every save_freq epochs, 0 to disable")
+parser.add_argument("--validate_freq", type=int, default=10, help="validate every validate_freq epoch")
 
 parser.add_argument("--batch_size", type=int, default=1, help="number of images in batch")
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
@@ -59,8 +60,8 @@ if not a.output_dir:
 loader = Loader(a.batch_size)
 
 
-def append_index(step):
-    index_path = os.path.join(a.output_dir, "index.html")
+def append_index(filename, info):
+    index_path = os.path.join(a.output_dir, filename)
     if os.path.exists(index_path):
         index = open(index_path, "a")
     else:
@@ -69,11 +70,29 @@ def append_index(step):
         index.write("<th>step</th><th>input</th><th>output</th><th>target</th></tr>")
 
     index.write("<tr>")
-    index.write("<td>%d</td>" % step)
+    index.write("<td>%d</td>" % info['step'])
     for kind in ["inputs", "outputs", "targets"]:
-        index.write("<td><img src='images/%010d_%s.jpg'></td>" % (step, kind))
+        index.write("<td><img src='images/%s'></td>" % info[kind])
     index.write("</tr>")
     return index_path
+
+
+def validate(global_step, model, sess):
+    fetches = {
+        "inputs": model.inputs,
+        "outputs": model.outputs,
+        'targets': model.targets
+    }
+    for step in range(loader.nval):
+        rooms, layouts = loader.next_batch(1)
+        results = sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
+        draw_np_cad(results['outputs'], os.path.join(a.output_dir, 'images', '%010d_%03d_outputs.jpg' % (global_step, step)))
+        draw_np_cad(results['targets'], os.path.join(a.output_dir, 'images', '%010d_%03d_targets.jpg' % (global_step, step)))
+        draw_np_color(results['inputs'], os.path.join(a.output_dir, 'images', '%010d_%03d_inputs.jpg' % (global_step, step)))
+        append_index('validate.html', {'step': global_step,
+                                       'inputs': '%010d_%03d_inputs.jpg' % (global_step, step),
+                                       'targets': '%010d_%03d_targets.jpg' % (global_step, step),
+                                       'outputs': '%010d_%03d_outputs.jpg' % (global_step, step)})
 
 
 def run():
@@ -131,6 +150,7 @@ def run():
     a.save_freq *= loader.ntrain
     a.display_freq *= loader.ntrain
     a.pre_train *= loader.ntrain
+    a.validate_freq *= loader.ntrain
 
     logdir = a.output_dir if a.summary_freq > 0 else None
     sv = tf.train.Supervisor(logdir=logdir, save_summaries_secs=0, saver=None)
@@ -144,18 +164,7 @@ def run():
             saver.restore(sess, checkpoint)
 
         if a.mode == "test":
-            fetches = {
-                "inputs": model.inputs,
-                "outputs": model.outputs,
-                'targets': model.targets
-            }
-            for i in range(loader.nval):
-                rooms, layouts = loader.next_batch(1)
-                results = sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
-                draw_np_cad(results['outputs'], os.path.join(a.output_dir, 'images', '%03d_outputs.jpg' % i))
-                draw_np_cad(results['targets'], os.path.join(a.output_dir, 'images', '%03d_targets.jpg' % i))
-                draw_np_color(results['inputs'], os.path.join(a.output_dir, 'images', '%03d_inputs.jpg' % i))
-                append_index(i)
+            validate(-1, model, sess)
         else:
             start = time.time()
 
@@ -194,6 +203,9 @@ def run():
                 rooms, layouts = loader.next_batch(0)
                 results = sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
 
+                if should(a.validate_freq):
+                    validate(step, model, sess)
+
                 if should(a.summary_freq):
                     print("recording summary")
                     sv.summary_writer.add_summary(results["summary"], results["global_step"])
@@ -202,7 +214,10 @@ def run():
                     draw_np_cad(results['outputs'], os.path.join(a.output_dir, 'images', '%010d_outputs.jpg' % step))
                     draw_np_cad(results['targets'], os.path.join(a.output_dir, 'images', '%010d_targets.jpg' % step))
                     draw_np_color(results['inputs'], os.path.join(a.output_dir, 'images', '%010d_inputs.jpg' % step))
-                    append_index(step)
+                    append_index('train.html', {'step': step,
+                                                'inputs': '%010d_inputs.jpg' % step,
+                                                'targets': '%010d_targets.jpg' % step,
+                                                'outputs': '%010d_outputs.jpg' % step})
 
                 if should(a.progress_freq):
                     # global_step will have the correct step count if we resume from a checkpoint
