@@ -197,7 +197,20 @@ class Model:
 
         return layers[-1], category, rotation
 
+    def pre_train_G(self, f, sess, loader, times):
+        fetches = f.copy()
+        fetches['train'] = self.gen_supervised_train
+        for _ in range(times):
+            rooms, layouts = loader.next_batch(0)
+            results = sess.run(fetches, {self.inputs: rooms, self.targets: layouts})
+        return results
 
+    def pre_train_D(self, f, sess, loader, times):
+        fetches = f.copy()
+        fetches['train'] = self.discrim_train
+        for _ in range(times):
+            rooms, layouts = loader.next_batch(0)
+            sess.run(fetches, {self.inputs: rooms, self.targets: layouts})
 
 
 

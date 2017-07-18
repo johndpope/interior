@@ -36,14 +36,15 @@ parser.add_argument("--validate_freq", type=int, default=10, help="validate ever
 parser.add_argument("--batch_size", type=int, default=1, help="number of images in batch")
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
 parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
-parser.add_argument("--discrim_freq", type=int, default=5, help="discrim training loop time")
+parser.add_argument("--discrim_freq", type=int, default=50, help="discrim training loop time")
 parser.add_argument("--lr", type=float, default=0.0002, help="initial learning rate for adam")
 parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
 parser.add_argument("--lam", type=float, default=10, help="discriminator gradient penalty weight")
 parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
 parser.add_argument("--gan_weight", type=float, default=1.0, help="weight on GAN term for generator gradient")
 
-parser.add_argument("--pre_train", type=int, default=5, help="pre-training epochs")
+parser.add_argument("--pre_train_G_epoch", type=int, default=50, help="generator pre-training epochs")
+parser.add_argument("--pre_train_D_epoch", type=int, default=50, help="discriminator pre-training epochs")
 
 
 a = parser.parse_args()
@@ -86,13 +87,22 @@ def validate(global_step, model, sess):
     for step in range(loader.nval):
         rooms, layouts = loader.next_batch(1)
         results = sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
-        draw_np_cad(results['outputs'], os.path.join(a.output_dir, 'images', '%010d_%03d_outputs.jpg' % (global_step, step)))
-        draw_np_cad(results['targets'], os.path.join(a.output_dir, 'images', '%010d_%03d_targets.jpg' % (global_step, step)))
-        draw_np_color(results['inputs'], os.path.join(a.output_dir, 'images', '%010d_%03d_inputs.jpg' % (global_step, step)))
-        append_index('validate.html', {'step': global_step,
-                                       'inputs': '%010d_%03d_inputs.jpg' % (global_step, step),
-                                       'targets': '%010d_%03d_targets.jpg' % (global_step, step),
-                                       'outputs': '%010d_%03d_outputs.jpg' % (global_step, step)})
+        append('validate.html', results, {
+            'outputs': '%010d_%03d_outputs.jpg' % (global_step, step),
+            'targets': '%010d_%03d_targets.jpg' % (global_step, step),
+            'inputs': '%010d_%03d_inputs.jpg' % (global_step, step),
+            'step': global_step
+        })
+
+
+def append(html_file, results, names):
+    draw_np_cad(results['outputs'],
+                os.path.join(a.output_dir, 'images', names['outputs']))
+    draw_np_cad(results['targets'],
+                os.path.join(a.output_dir, 'images', names['targets']))
+    draw_np_color(results['inputs'],
+                  os.path.join(a.output_dir, 'images', names['inputs']))
+    append_index(html_file, names)
 
 
 def run():
@@ -149,7 +159,6 @@ def run():
     a.progress_freq *= loader.ntrain
     a.save_freq *= loader.ntrain
     a.display_freq *= loader.ntrain
-    a.pre_train *= loader.ntrain
     a.validate_freq *= loader.ntrain
 
     logdir = a.output_dir if a.summary_freq > 0 else None
@@ -170,27 +179,41 @@ def run():
 
             max_steps = a.max_epochs * loader.ntrain
 
+            for e in range(a.pre_train_G_epoch):
+                if e % 10 == 0 or e == a.pre_train_G_epoch - 1:
+                    fetches = {"inputs": model.inputs,
+                               'outputs': model.outputs,
+                               'targets': model.targets}
+                    for step in range(loader.ntrain):
+                        results = model.pre_train_G(fetches, sess, loader, 1)
+                        prefix = -a.pre_train_G_epoch + e
+                        append('train.html', results, {
+                            'outputs': '%010d_%03d_outputs.jpg' % (prefix, step),
+                            'targets': '%010d_%03d_targets.jpg' % (prefix, step),
+                            'inputs': '%010d_%03d_inputs.jpg' % (prefix, step),
+                            'step': prefix
+                        })
+                else:
+                    model.pre_train_G({}, sess, loader, loader.ntrain)
+
+            model.pre_train_D({}, sess, loader, a.pre_train_D_epoch * loader.ntrain)
+
             for step in range(max_steps):
+
                 def should(freq):
                     return freq > 0 and ((step + 1) % freq == 0 or step == max_steps - 1)
 
-                if step < a.pre_train:
-                    fetches = {
-                        "train": model.gen_supervised_train,
-                        "global_step": sv.global_step,
-                    }
-                else:
-                    fetches = {
-                        "train": model.discrim_train,
-                    }
-                    for _ in range(a.discrim_freq):
-                        rooms, layouts = loader.next_batch(0)
-                        sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
+                fetches = {
+                    "train": model.discrim_train,
+                }
+                for _ in range(a.discrim_freq):
+                    rooms, layouts = loader.next_batch(0)
+                    sess.run(fetches, {model.inputs: rooms, model.targets: layouts})
 
-                    fetches = {
-                        "train": model.gen_adversarial_train,
-                        "global_step": sv.global_step,
-                    }
+                fetches = {
+                    "train": model.gen_adversarial_train,
+                    "global_step": sv.global_step,
+                }
 
                 if should(a.summary_freq):
                     fetches["summary"] = sv.summary_op
@@ -211,13 +234,12 @@ def run():
                     sv.summary_writer.add_summary(results["summary"], results["global_step"])
 
                 if should(a.display_freq):
-                    draw_np_cad(results['outputs'], os.path.join(a.output_dir, 'images', '%010d_outputs.jpg' % step))
-                    draw_np_cad(results['targets'], os.path.join(a.output_dir, 'images', '%010d_targets.jpg' % step))
-                    draw_np_color(results['inputs'], os.path.join(a.output_dir, 'images', '%010d_inputs.jpg' % step))
-                    append_index('train.html', {'step': step,
-                                                'inputs': '%010d_inputs.jpg' % step,
-                                                'targets': '%010d_targets.jpg' % step,
-                                                'outputs': '%010d_outputs.jpg' % step})
+                    append('train.html', results, {
+                        'step': step,
+                        'outputs': '%010d_outputs.jpg' % step,
+                        'targets': '%010d_targets.jpg' % step,
+                        'inputs': '%010d_inputs.jpg' % step
+                    })
 
                 if should(a.progress_freq):
                     # global_step will have the correct step count if we resume from a checkpoint
