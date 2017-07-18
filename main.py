@@ -175,7 +175,6 @@ def run():
         if a.mode == "test":
             validate(-1, model, sess)
         else:
-            start = time.time()
 
             max_steps = a.max_epochs * loader.ntrain
 
@@ -198,6 +197,7 @@ def run():
 
             model.pre_train_D({}, sess, loader, a.pre_train_D_epoch * loader.ntrain)
 
+            start = time.time()
             for step in range(max_steps):
 
                 def should(freq):
