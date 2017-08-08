@@ -37,7 +37,8 @@ parser.add_argument("--batch_size", type=int, default=1, help="number of images 
 parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
 parser.add_argument("--ndf", type=int, default=64, help="number of discriminator filters in first conv layer")
 parser.add_argument("--discrim_freq", type=int, default=50, help="discrim training loop time")
-parser.add_argument("--lr", type=float, default=0.0002, help="initial learning rate for adam")
+parser.add_argument("--lr_discriminator", type=float, default=0.0002, help="initial learning rate for discriminator")
+parser.add_argument("--lr_generator", type=float, default=0.0002, help="initial learning rate for generator")
 parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
 parser.add_argument("--lam", type=float, default=10, help="discriminator gradient penalty weight")
 parser.add_argument("--l1_weight", type=float, default=100.0, help="weight on L1 term for generator gradient")
@@ -140,8 +141,10 @@ def run():
     model = Model(a, loader.room_nc, loader.room_width)
 
     tf.summary.scalar("discriminator_loss", model.discrim_loss)
-    tf.summary.scalar("discriminator_gan_loss", model.discrim_GAN_loss)
-    tf.summary.scalar('discriminator_grad_pen', model.grad_pen)
+    tf.summary.scalar('predict_fake', tf.squeeze(model.predict_fake))
+    tf.summary.scalar('predict_real', tf.squeeze(model.predict_real))
+    # tf.summary.scalar("discriminator_gan_loss", model.discrim_GAN_loss)
+    # tf.summary.scalar('discriminator_grad_pen', model.grad_pen)
 
     tf.summary.scalar("generator_loss_GAN", model.gen_loss_GAN)
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
@@ -149,6 +152,12 @@ def run():
     tf.summary.scalar('rotation_loss', model.rotation_loss)
     tf.summary.scalar("generator_adversarial_loss", model.gen_loss)
     tf.summary.scalar("generator_supervised_loss", model.gen_supervised_loss)
+
+    for var in tf.trainable_variables():
+        tf.summary.histogram(var.op.name + "/values", var)
+
+    for grad, var in model.discrim_grads_and_vars + model.gen_grads_and_vars:
+        tf.summary.histogram(var.op.name + "/gradients", grad)
 
     with tf.name_scope("parameter_count"):
         parameter_count = tf.reduce_sum([tf.reduce_prod(tf.shape(v)) for v in tf.trainable_variables()])
